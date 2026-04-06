@@ -1,0 +1,51 @@
+[project]
+name = "enterprise-rag"
+version = "0.1.0"
+description = "Enterprise RAG system powered by local LLMs via Ollama with Open WebUI frontend"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Ollama Python client - communicate with local Ollama model server
+    "ollama>=0.4.0",
+    # Open WebUI - web-based frontend for interacting with local LLMs
+    "open-webui>=0.6.0",
+
+    # --- RAG Framework ---
+    # LangChain core
+    "langchain>=0.3.0",
+    # Community integrations (document loaders, text splitters, etc.)
+    "langchain-community>=0.3.0",
+    # Ollama integration for LangChain
+    "langchain-ollama>=0.2.0",
+    # Qdrant integration for LangChain
+    "langchain-qdrant>=0.2.0",
+
+    # --- Vector Database ---
+    # Qdrant client (supports local in-memory mode for dev, server mode for prod)
+    "qdrant-client>=1.12.0",
+
+    # --- Embeddings ---
+    # Local embedding models (no external API needed)
+    "sentence-transformers>=3.0.0",
+
+    # --- Document Processing ---
+    # PDF parsing
+    "pypdf>=5.0.0",
+    # Word document parsing
+    "python-docx>=1.1.0",
+
+    # --- OpenWebUI Pipeline Server ---
+    # External RAG pipeline server that OpenWebUI connects to
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+
+    # --- RAG Evaluation ---
+    # Evaluate retrieval quality, answer faithfulness, relevance, etc.
+    "ragas>=0.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.9.0",
+]

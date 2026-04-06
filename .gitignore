@@ -32,3 +32,12 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# uv
+.python-version
+
+# pytest
+.pytest_cache/
+
+# ruff
+.ruff_cache/
