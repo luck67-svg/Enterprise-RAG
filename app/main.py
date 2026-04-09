@@ -1,3 +1,4 @@
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from loguru import logger
@@ -5,6 +6,11 @@ from app.api import kb, openai_compat
 from app.config import settings
 from app.llm.ollama_client import list_ollama_models
 from app.rag.vectorstore import get_vectorstore
+
+
+# 强制 loguru 输出彩色（通过 tee 管道时也生效）
+logger.remove()
+logger.add(sys.stderr, colorize=True)
 
 
 @asynccontextmanager
