@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:0.5b"
+    ollama_model: str = "qwen3.5:35b"
+
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "enterprise_rag"

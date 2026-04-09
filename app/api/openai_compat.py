@@ -36,10 +36,22 @@ def list_models():
 
 @router.post("/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
-    # Take the last user message as the question (stage 1: no multi-turn memory).
+    import time
+    from loguru import logger
+
     question = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+
     chain = build_rag_chain()
-    answer = await chain.ainvoke(question)
+
+    t0 = time.perf_counter()
+    try:
+        logger.info(f"invoking chain | question: {question[:50]}")
+        answer = await chain.ainvoke(question)
+        t1 = time.perf_counter()
+        logger.info(f"chain total: {t1 - t0:.2f}s")
+    except Exception as e:
+        logger.error(f"chain error after {time.perf_counter() - t0:.2f}s: {e!r}")
+        raise
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",

@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
+from loguru import logger
 
 from app.config import settings
 from app.llm.ollama_client import get_llm
@@ -21,6 +22,11 @@ PROMPT = ChatPromptTemplate.from_messages(
 
 
 def _format_docs(docs: list[Document]) -> str:
+    logger.info(f"retrieval done: {len(docs)} chunks")
+    for i, d in enumerate(docs, 1):
+        src = d.metadata.get("source", "unknown")
+        page = d.metadata.get("page", "?")
+        logger.debug(f"  [{i}] {src} p.{page}: {d.page_content[:80]}")
     parts = []
     for i, d in enumerate(docs, 1):
         src = d.metadata.get("source", "unknown")
