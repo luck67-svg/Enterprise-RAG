@@ -9,12 +9,12 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen2.5:0.5b"
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "enterprise_rag"
 
-    embedding_model: str = "BAAI/bge-m3"
+    embedding_model: str = "bge-m3"
     embedding_device: str = "cpu"
 
     chunk_size: int = 800
