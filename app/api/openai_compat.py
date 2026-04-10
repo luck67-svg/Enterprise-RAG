@@ -86,7 +86,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         raise
     except Exception as e:
         logger.error(f"chain error after {time.perf_counter() - t0:.2f}s: {e!r}")
-        raise
+        return _wrap_response(_chain_error_message(e))
 
     return _wrap_response(answer)
 
@@ -114,6 +114,18 @@ async def _stream_response(chain, chain_input: dict, request: Request):
     except asyncio.CancelledError:
         logger.info("stream cancelled by client")
         return
+    except Exception as e:
+        logger.error(f"stream error: {e!r}")
+        err_chunk = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": MODEL_ID,
+            "choices": [{"index": 0, "delta": {"content": _chain_error_message(e)}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(err_chunk, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
 
     done_chunk = {
         "id": chat_id,
@@ -126,6 +138,18 @@ async def _stream_response(chain, chain_input: dict, request: Request):
     yield "data: [DONE]\n\n"
 
     logger.info(f"stream total: {time.perf_counter() - t0:.2f}s")
+
+
+def _chain_error_message(exc: Exception) -> str:
+    """将 chain 异常转为用户可读的回答。"""
+    text = str(exc).lower()
+    if "connect" in text and "11434" in text:
+        return "[错误] Ollama 服务不可达，请检查是否已启动。"
+    if "connect" in text and "6333" in text:
+        return "[错误] Qdrant 不可达，请检查 Docker 容器是否已启动。"
+    if "ollama" in text or "refused" in text:
+        return "[错误] Ollama 连接失败，请检查服务状态。"
+    return f"[错误] 处理请求时出现异常: {type(exc).__name__}"
 
 
 def _wrap_response(answer: str) -> dict:

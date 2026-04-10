@@ -58,12 +58,26 @@ async def upload(file: UploadFile = File(...)):
         _delete_vectors_by_source(file.filename)
         logger.info(f"replaced old vectors: {file.filename}")
 
-    docs = load_file(dest)
+    try:
+        docs = load_file(dest)
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(422, f"文档解析失败: {e}")
+
     chunks = split_documents(docs)
     for c in chunks:
         c.metadata["source"] = file.filename
 
-    ids = get_vectorstore().add_documents(chunks)
+    try:
+        ids = get_vectorstore().add_documents(chunks)
+    except Exception as e:
+        err = str(e).lower()
+        if "connect" in err and "6333" in err:
+            raise HTTPException(503, "Qdrant 不可达，请检查 Docker 容器是否已启动")
+        if "ollama" in err or "11434" in err or "embed" in err:
+            raise HTTPException(503, "Embedding 调用失败，请检查 Ollama 和 bge-m3 模型是否可用")
+        raise HTTPException(503, f"向量入库失败: {e}")
+
     _file_hashes[file.filename] = file_hash
     return {"file": file.filename, "chunks": len(chunks), "ids": len(ids)}
 
