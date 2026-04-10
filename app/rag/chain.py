@@ -1,5 +1,5 @@
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from loguru import logger
@@ -16,9 +16,11 @@ SYSTEM_PROMPT = """你是一个企业知识库问答助手。请严格依据下�
 {context}
 """
 
-PROMPT = ChatPromptTemplate.from_messages(
-    [("system", SYSTEM_PROMPT), ("human", "{question}")]
-)
+PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{question}"),
+])
 
 
 def _format_docs(docs: list[Document]) -> str:
@@ -35,12 +37,23 @@ def _format_docs(docs: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
-def build_rag_chain():
+def build_rag_chain(chat_history: list[tuple[str, str]] | None = None):
+    """构建 RAG chain，可选传入对话历史。
+
+    Args:
+        chat_history: [(role, content), ...] 格式的历史消息列表
+    """
     retriever = get_vectorstore().as_retriever(search_kwargs={"k": settings.retrieval_top_k})
     llm = get_llm()
+    history = chat_history or []
+
     return (
-        {"context": retriever | _format_docs, "question": RunnablePassthrough()}
+        {
+            "context": RunnableLambda(lambda x: x["question"]) | retriever | _format_docs,
+            "question": RunnableLambda(lambda x: x["question"]),
+            "chat_history": RunnableLambda(lambda x: x["chat_history"]),
+        }
         | PROMPT
         | llm
         | StrOutputParser()
-    )
+    ).with_config({"run_name": "rag_chain"})

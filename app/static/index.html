@@ -112,7 +112,11 @@ async function uploadFiles(files) {
       const res = await fetch('/kb/upload', { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || '上传失败');
-      toast(`${file.name} 上传成功，${data.chunks} 个片段`, 'success');
+      if (data.skipped) {
+        toast(`${file.name} 内容未变化，已跳过`, 'success');
+      } else {
+        toast(`${file.name} 上传成功，${data.chunks} 个片段`, 'success');
+      }
     } catch (e) {
       toast(`${file.name}: ${e.message}`, 'error');
     }

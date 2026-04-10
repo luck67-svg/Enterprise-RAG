@@ -8,13 +8,13 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from app.config import settings
 from app.rag.chain import build_rag_chain
 
 router = APIRouter(prefix="/v1", tags=["openai"])
 
 MODEL_ID = "enterprise-rag"
 REQUEST_TIMEOUT = 120  # 秒
+MAX_HISTORY_TURNS = 10  # 最多保留的历史轮数
 
 
 class ChatMessage(BaseModel):
@@ -39,21 +39,44 @@ def list_models():
     }
 
 
+def _extract_history_and_question(messages: list[ChatMessage]) -> tuple[list[tuple[str, str]], str]:
+    """从 OpenAI 格式的 messages 中提取历史对话和当前问题。"""
+    question = ""
+    history: list[tuple[str, str]] = []
+
+    # 最后一条 user message 作为当前问题，之前的作为历史
+    for i, m in enumerate(messages):
+        if m.role == "system":
+            continue
+        if m.role == "user" and i == len(messages) - 1:
+            question = m.content
+        elif m.role in ("user", "assistant"):
+            history.append((m.role, m.content))
+
+    # 限制历史轮数
+    history = history[-MAX_HISTORY_TURNS * 2:]
+    return history, question
+
+
 @router.post("/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
-    question = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+    history, question = _extract_history_and_question(req.messages)
     chain = build_rag_chain()
+    chain_input = {"question": question, "chat_history": history}
+
+    if history:
+        logger.info(f"chat history: {len(history)} messages")
 
     if req.stream:
         return StreamingResponse(
-            _stream_response(chain, question, request),
+            _stream_response(chain, chain_input, request),
             media_type="text/event-stream",
         )
 
     t0 = time.perf_counter()
     try:
         logger.info(f"invoking chain | question: {question[:50]}")
-        answer = await asyncio.wait_for(chain.ainvoke(question), timeout=REQUEST_TIMEOUT)
+        answer = await asyncio.wait_for(chain.ainvoke(chain_input), timeout=REQUEST_TIMEOUT)
         logger.info(f"chain total: {time.perf_counter() - t0:.2f}s")
     except asyncio.TimeoutError:
         logger.warning(f"chain timeout after {REQUEST_TIMEOUT}s")
@@ -68,15 +91,14 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     return _wrap_response(answer)
 
 
-async def _stream_response(chain, question: str, request: Request):
+async def _stream_response(chain, chain_input: dict, request: Request):
     """SSE streaming with client disconnect detection."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     t0 = time.perf_counter()
-    logger.info(f"streaming chain | question: {question[:50]}")
+    logger.info(f"streaming chain | question: {chain_input['question'][:50]}")
 
     try:
-        async for token in chain.astream(question):
-            # 检测客户端是否已断开
+        async for token in chain.astream(chain_input):
             if await request.is_disconnected():
                 logger.info("client disconnected, stopping stream")
                 return

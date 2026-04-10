@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from loguru import logger
@@ -7,7 +8,28 @@ from app.rag.loaders import load_file, SUPPORTED_EXTENSIONS
 from app.rag.splitter import split_documents
 from app.rag.vectorstore import get_vectorstore, get_client
 
+# 已上传文件的哈希缓存: {filename: sha256_hex}
+_file_hashes: dict[str, str] = {}
+
 router = APIRouter(prefix="/kb", tags=["kb"])
+
+
+def _compute_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _init_file_hashes() -> None:
+    """启动时从已上传文件构建哈希缓存。"""
+    upload_dir = Path(settings.upload_dir)
+    if not upload_dir.exists():
+        return
+    for f in upload_dir.iterdir():
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+            _file_hashes[f.name] = _compute_hash(f.read_bytes())
+
+
+# 初始化缓存
+_init_file_hashes()
 
 
 @router.post("/upload")
@@ -19,9 +41,22 @@ async def upload(file: UploadFile = File(...)):
     if suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(415, f"不支持的文件类型: {suffix}，支持: {', '.join(SUPPORTED_EXTENSIONS)}")
 
+    content = await file.read()
+    file_hash = _compute_hash(content)
+
+    # 检查是否重复文件（同名同内容）
+    if file.filename in _file_hashes and _file_hashes[file.filename] == file_hash:
+        logger.info(f"skip duplicate: {file.filename}")
+        return {"file": file.filename, "chunks": 0, "ids": 0, "skipped": True, "reason": "文件内容未变化，跳过上传"}
+
     dest = Path(settings.upload_dir) / file.filename
-    dest.write_bytes(await file.read())
+    dest.write_bytes(content)
     logger.info(f"saved upload: {dest}")
+
+    # 如果同名文件内容变了，先删除旧向量
+    if file.filename in _file_hashes:
+        _delete_vectors_by_source(file.filename)
+        logger.info(f"replaced old vectors: {file.filename}")
 
     docs = load_file(dest)
     chunks = split_documents(docs)
@@ -29,6 +64,7 @@ async def upload(file: UploadFile = File(...)):
         c.metadata["source"] = file.filename
 
     ids = get_vectorstore().add_documents(chunks)
+    _file_hashes[file.filename] = file_hash
     return {"file": file.filename, "chunks": len(chunks), "ids": len(ids)}
 
 
@@ -47,24 +83,27 @@ def list_documents():
     return {"documents": docs}
 
 
-@router.delete("/documents/{filename}")
-def delete_document(filename: str):
-    """删除指定文档及其在 Qdrant 中的向量。"""
-    # 删除文件
-    filepath = Path(settings.upload_dir) / filename
-    if filepath.exists():
-        filepath.unlink()
-
-    # 删除 Qdrant 中对应的向量
-    client = get_client()
+def _delete_vectors_by_source(filename: str) -> None:
+    """删除 Qdrant 中指定 source 的所有向量。"""
     from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
-    client.delete(
+    get_client().delete(
         collection_name=settings.qdrant_collection,
         points_selector=Filter(
             must=[FieldCondition(key="metadata.source", match=MatchValue(value=filename))]
         ),
     )
+
+
+@router.delete("/documents/{filename}")
+def delete_document(filename: str):
+    """删除指定文档及其在 Qdrant 中的向量。"""
+    filepath = Path(settings.upload_dir) / filename
+    if filepath.exists():
+        filepath.unlink()
+
+    _delete_vectors_by_source(filename)
+    _file_hashes.pop(filename, None)
     logger.info(f"deleted document: {filename}")
     return {"deleted": filename}
 
