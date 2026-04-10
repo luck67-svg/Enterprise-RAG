@@ -1,6 +1,9 @@
 import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from loguru import logger
 from app.api import kb, openai_compat
 from app.config import settings
@@ -35,6 +38,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Enterprise RAG", version="0.1.0", lifespan=lifespan)
 app.include_router(kb.router)
 app.include_router(openai_compat.router)
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")
