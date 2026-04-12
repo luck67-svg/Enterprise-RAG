@@ -40,6 +40,11 @@ def _format_docs(docs: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
+def get_retriever():
+    """暴露 retriever，供评估脚本收集 retrieved_contexts 使用。"""
+    return get_vectorstore().as_retriever(search_kwargs={"k": settings.retrieval_top_k})
+
+
 def get_rag_chain(temperature: float = 0.2):
     """返回 RAG chain 单例，相同 temperature 复用同一实例。"""
     if temperature not in _chain_cache:

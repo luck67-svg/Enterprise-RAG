@@ -10,7 +10,6 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
     "python-multipart>=0.0.9",
-
     # LangChain
     "langchain>=0.3",
     "langchain-community>=0.3",
@@ -19,17 +18,15 @@ dependencies = [
     "langchain-qdrant>=0.2",
     # Vector database
     "qdrant-client>=1.12",
-
     # Document parsing
     "pymupdf>=1.24",
     "python-docx>=1.1",
-
     # HTTP / utils
     "httpx[socks]>=0.27",
     "loguru>=0.7",
-
     # RAG evaluation (阶段3)
     "ragas>=0.2",
+    "rapidfuzz>=3.14.5",
 ]
 
 [tool.uv]
