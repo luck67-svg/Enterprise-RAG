@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.config import settings
 from app.rag.loaders import load_file, SUPPORTED_EXTENSIONS
-from app.rag.splitter import split_documents
+from app.rag.splitter import split_parent_child
 from app.rag.vectorstore import get_vectorstore, get_client
 
 # 已上传文件的哈希缓存: {filename: sha256_hex}
@@ -64,7 +64,7 @@ async def upload(file: UploadFile = File(...)):
         dest.unlink(missing_ok=True)
         raise HTTPException(422, f"文档解析失败: {e}")
 
-    chunks = split_documents(docs)
+    chunks = split_parent_child(docs)
     for c in chunks:
         c.metadata["source"] = file.filename
 

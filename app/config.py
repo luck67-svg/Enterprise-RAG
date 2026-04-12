@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120
     retrieval_top_k: int = 5
 
+    parent_chunk_size: int = 1000
+    child_chunk_size: int = 400
+    child_chunk_overlap: int = 60
+    child_retrieval_k: int = 15
+
     upload_dir: Path = Path("./data/uploads")
 
 
