@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.config import settings
 from app.llm.ollama_client import get_llm
+from app.rag.reranker import rerank_documents
 from app.rag.vectorstore import get_vectorstore
 
 SYSTEM_PROMPT = """你是一个企业知识库问答助手。请严格依据下面提供的【上下文】回答用户问题。
@@ -82,7 +83,8 @@ def get_retriever():
         ) -> list[Document]:
             child_docs = base_retriever.invoke(query)
             parents = _expand_to_parents(child_docs)
-            return parents[:final_top_k]
+            reranked = rerank_documents(query, parents)
+            return reranked[:final_top_k]
 
     return ParentExpandingRetriever()
 

@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     parent_chunk_size: int = 1000
     child_chunk_size: int = 400
     child_chunk_overlap: int = 60
-    child_retrieval_k: int = 15
+    child_retrieval_k: int = 25
+
+    reranker_base_url: str = "http://localhost:8001"
 
     upload_dir: Path = Path("./data/uploads")
 

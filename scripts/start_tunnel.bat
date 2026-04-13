@@ -42,6 +42,13 @@ echo     隧道已在后台运行
 echo === 同步远程 Ollama 日志 -^> logs\ollama.log
 start /b ssh %SSH_OPTS% %REMOTE_SSH_USER%@%REMOTE_SSH_HOST% "tail -f /tmp/ollama.log" > "%PROJECT_DIR%\logs\ollama.log" 2>&1
 
+echo === 检查远程 Reranker 服务状态...
+ssh %SSH_OPTS% %REMOTE_SSH_USER%@%REMOTE_SSH_HOST% "curl -sf http://localhost:8001/health >/dev/null 2>&1 && echo Reranker已在运行 || (echo 正在启动Reranker... && nohup uvicorn reranker_service:app --host 0.0.0.0 --port 8001 > ~/reranker.log 2>&1 & sleep 5 && echo Reranker启动完成)"
+
+echo === 建立 Reranker 隧道: localhost:8001 -^> %REMOTE_SSH_HOST%:8001
+start /b ssh %SSH_OPTS% -NL 8001:localhost:8001 %REMOTE_SSH_USER%@%REMOTE_SSH_HOST%
+echo     Reranker 隧道已在后台运行
+
 goto :start_fastapi
 
 :local_ollama
