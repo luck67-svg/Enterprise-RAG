@@ -8,9 +8,6 @@ from app.rag.embeddings import get_embeddings
 _client: QdrantClient | None = None
 _store: QdrantVectorStore | None = None
 
-# BGE-M3 dense dim
-EMBED_DIM = 1024
-
 
 def get_client() -> QdrantClient:
     global _client
@@ -19,12 +16,20 @@ def get_client() -> QdrantClient:
     return _client
 
 
+def _detect_embed_dim() -> int:
+    """通过一次测试嵌入探测实际向量维度，避免硬编码。"""
+    from app.rag.embeddings import get_embeddings
+    sample = get_embeddings().embed_query("dim-probe")
+    return len(sample)
+
+
 def ensure_collection() -> None:
     client = get_client()
     if not client.collection_exists(settings.qdrant_collection):
+        dim = _detect_embed_dim()
         client.create_collection(
             collection_name=settings.qdrant_collection,
-            vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
 
 

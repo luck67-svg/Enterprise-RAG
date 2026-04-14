@@ -43,17 +43,26 @@ with warnings.catch_warnings():
     )
 
 from app.config import settings
-from app.rag.chain import get_rag_chain, get_retriever
+from app.rag.chain import get_retriever, get_llm, PROMPT, _format_docs
+from langchain_core.output_parsers import StrOutputParser
 
 
 def run_rag(question: str) -> tuple[str, list[str]]:
-    """对单个问题运行 RAG，返回 (answer, retrieved_contexts)。"""
+    """对单个问题运行 RAG，返回 (answer, retrieved_contexts)。
+
+    单次检索 pass：先检索文档，再用同一批文档构造 LLM prompt 生成答案，
+    确保传给 Ragas 的 retrieved_contexts 与 LLM 实际看到的上下文严格一致。
+    """
     retriever = get_retriever()
     docs = retriever.invoke(question)
     contexts = [d.page_content for d in docs]
 
-    chain = get_rag_chain()
-    answer = chain.invoke({"question": question, "chat_history": []})
+    formatted_context = _format_docs(docs)
+    answer = (PROMPT | get_llm() | StrOutputParser()).invoke({
+        "context": formatted_context,
+        "question": question,
+        "chat_history": [],
+    })
     return answer, contexts
 
 
@@ -107,12 +116,13 @@ def main():
     has_reference = df["reference"].notna().any()
 
     # 2. 对每个问题运行 RAG，收集答案和检索上下文
-    logger.info(f"\n开始运行 RAG（共 {len(questions)} 个问题）...")
+    total_questions = len(questions)
+    logger.info(f"\n开始运行 RAG（共 {total_questions} 个问题）...")
     samples = []
-    failed = 0
+    failed_indices: list[int] = []
 
     for i, (question, reference) in enumerate(zip(questions, references), 1):
-        logger.info(f"  [{i}/{len(questions)}] {str(question)[:60]}...")
+        logger.info(f"  [{i}/{total_questions}] {str(question)[:60]}...")
         try:
             answer, contexts = run_rag(question)
             sample = SingleTurnSample(
@@ -125,14 +135,26 @@ def main():
             logger.debug(f"    contexts: {len(contexts)} 个，answer: {str(answer)[:60]}")
         except Exception as e:
             logger.warning(f"    问题 [{i}] 处理失败，跳过：{e}")
-            failed += 1
+            failed_indices.append(i)
+
+    failed = len(failed_indices)
+    fail_rate = failed / total_questions if total_questions else 0
 
     if not samples:
         logger.error("所有问题处理失败，请检查 Qdrant 和 Ollama 是否正在运行")
         sys.exit(1)
 
     if failed:
-        logger.warning(f"{failed} 个问题处理失败，跳过（成功 {len(samples)} 个）")
+        logger.warning(f"{failed}/{total_questions} 个问题处理失败（索引：{failed_indices}）")
+
+    # 失败率超过 10% 时拒绝继续，避免评分因样本缺失而虚高
+    FAIL_RATE_THRESHOLD = 0.10
+    if fail_rate > FAIL_RATE_THRESHOLD:
+        logger.error(
+            f"失败率 {fail_rate:.1%} 超过阈值 {FAIL_RATE_THRESHOLD:.0%}，"
+            "评分结果不可信，请检查服务状态后重试"
+        )
+        sys.exit(1)
 
     # 3. 构建 EvaluationDataset
     eval_dataset = EvaluationDataset(samples=samples)
@@ -190,6 +212,9 @@ def main():
         "run_name": args.output,
         "scores": scores,
         "num_samples": len(samples),
+        "total_questions": total_questions,
+        "failed_count": failed,
+        "failed_indices": failed_indices,
         "model": settings.ollama_model,
         "embedding": settings.embedding_model,
     }
@@ -205,13 +230,23 @@ def main():
         try:
             with open(latest) as f:
                 prev = json.load(f)
-            print(f"\n  与上次结果对比（{latest.stem}）：")
-            for metric in scores:
-                curr_val = scores.get(metric) or 0
-                prev_val = (prev.get("scores") or {}).get(metric) or 0
-                delta = curr_val - prev_val
-                arrow = "↑" if delta > 0.005 else ("↓" if delta < -0.005 else "→")
-                print(f"  {metric:<35} {arrow} {delta:+.4f}")
+            prev_total = prev.get("total_questions", prev.get("num_samples", 0))
+            prev_failed = prev.get("failed_count", 0)
+            prev_complete = (prev_total - prev_failed) / prev_total if prev_total else 0
+            curr_complete = (total_questions - failed) / total_questions if total_questions else 0
+            if prev_complete < (1 - FAIL_RATE_THRESHOLD) or curr_complete < (1 - FAIL_RATE_THRESHOLD):
+                logger.warning(
+                    f"跳过历史对比：当前完成率 {curr_complete:.1%}，"
+                    f"历史完成率 {prev_complete:.1%}，两者须均 ≥{1-FAIL_RATE_THRESHOLD:.0%}"
+                )
+            else:
+                print(f"\n  与上次结果对比（{latest.stem}）：")
+                for metric in scores:
+                    curr_val = scores.get(metric) or 0
+                    prev_val = (prev.get("scores") or {}).get(metric) or 0
+                    delta = curr_val - prev_val
+                    arrow = "↑" if delta > 0.005 else ("↓" if delta < -0.005 else "→")
+                    print(f"  {metric:<35} {arrow} {delta:+.4f}")
         except Exception:
             pass
 

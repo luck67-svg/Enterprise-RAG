@@ -121,20 +121,21 @@ async def _stream_response(chain, chain_input: dict, request: Request):
     logger.info(f"streaming chain | question: {chain_input['question'][:50]}")
 
     try:
-        async for token in chain.astream(chain_input):
-            if await request.is_disconnected():
-                logger.info("client disconnected, stopping stream")
-                return
+        # asyncio.timeout 包裹整个流，任意相邻 token 间隔超过阈值即触发 TimeoutError
+        async with asyncio.timeout(STREAM_TOKEN_TIMEOUT):
+            async for token in chain.astream(chain_input):
+                if await request.is_disconnected():
+                    logger.info("client disconnected, stopping stream")
+                    return
 
-            # 用 wait_for 包单次 yield 防止 Ollama 卡死
-            chunk = {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": MODEL_ID,
-                "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                chunk = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": MODEL_ID,
+                    "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
     except asyncio.TimeoutError:
         logger.warning(f"stream token timeout after {STREAM_TOKEN_TIMEOUT}s")

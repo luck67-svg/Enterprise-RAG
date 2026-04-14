@@ -64,13 +64,40 @@ else
     fi
     '"
 
-    # SSH 端口转发
+    # SSH 端口转发（Ollama）
     echo ">>> 建立 SSH 隧道: localhost:${LOCAL_PORT} -> ${REMOTE_HOST}:${REMOTE_PORT}"
     if lsof -ti :"${LOCAL_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
         echo "    端口 ${LOCAL_PORT} 已被占用，跳过隧道建立"
     else
         ssh "${SSH_OPTS[@]}" -fNL "${LOCAL_PORT}:localhost:${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}"
         echo "    隧道已在后台运行"
+    fi
+
+    # 启动远程 Reranker 服务
+    RERANKER_PORT="${RERANKER_PORT:-8001}"
+    echo ">>> 检查远程 Reranker 服务状态..."
+    ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" bash -c "'
+    if curl -sf http://localhost:${RERANKER_PORT}/health >/dev/null 2>&1; then
+        echo \"Reranker 已在运行\"
+    else
+        echo \"正在启动 Reranker...\"
+        nohup uvicorn reranker_service:app --host 0.0.0.0 --port ${RERANKER_PORT} > ~/reranker.log 2>&1 &
+        sleep 5
+        if curl -sf http://localhost:${RERANKER_PORT}/health >/dev/null 2>&1; then
+            echo \"Reranker 启动成功\"
+        else
+            echo \"[WARN] Reranker 启动失败，查询将使用原始排序（检查远程 ~/reranker.log）\" >&2
+        fi
+    fi
+    '"
+
+    # SSH 端口转发（Reranker）
+    echo ">>> 建立 Reranker 隧道: localhost:${RERANKER_PORT} -> ${REMOTE_HOST}:${RERANKER_PORT}"
+    if lsof -ti :"${RERANKER_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "    端口 ${RERANKER_PORT} 已被占用，跳过隧道建立"
+    else
+        ssh "${SSH_OPTS[@]}" -fNL "${RERANKER_PORT}:localhost:${RERANKER_PORT}" "${REMOTE_USER}@${REMOTE_HOST}"
+        echo "    Reranker 隧道已在后台运行"
     fi
 
     # 同步远程日志
@@ -91,7 +118,11 @@ cleanup() {
     if [[ "$MODE" != "--local" ]]; then
         TUNNEL_PID=$(lsof -ti :"${LOCAL_PORT}" -sTCP:LISTEN 2>/dev/null)
         if [[ -n "$TUNNEL_PID" ]]; then
-            kill "$TUNNEL_PID" 2>/dev/null && echo "    SSH 隧道已关闭"
+            kill "$TUNNEL_PID" 2>/dev/null && echo "    Ollama 隧道已关闭"
+        fi
+        RERANKER_TUNNEL_PID=$(lsof -ti :"${RERANKER_PORT:-8001}" -sTCP:LISTEN 2>/dev/null)
+        if [[ -n "$RERANKER_TUNNEL_PID" ]]; then
+            kill "$RERANKER_TUNNEL_PID" 2>/dev/null && echo "    Reranker 隧道已关闭"
         fi
     fi
 }
