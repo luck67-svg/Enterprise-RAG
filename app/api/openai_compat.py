@@ -15,7 +15,7 @@ router = APIRouter(prefix="/v1", tags=["openai"])
 
 MODEL_ID = "enterprise-rag"
 REQUEST_TIMEOUT = 120       # 秒，非流式总超时
-STREAM_TOKEN_TIMEOUT = 30   # 秒，流式单 token 超时
+STREAM_TOKEN_TIMEOUT = 120  # seconds; max wait for the next streamed token
 
 
 class ChatMessage(BaseModel):
@@ -121,21 +121,29 @@ async def _stream_response(chain, chain_input: dict, request: Request):
     logger.info(f"streaming chain | question: {chain_input['question'][:50]}")
 
     try:
-        # asyncio.timeout 包裹整个流，任意相邻 token 间隔超过阈值即触发 TimeoutError
-        async with asyncio.timeout(STREAM_TOKEN_TIMEOUT):
-            async for token in chain.astream(chain_input):
-                if await request.is_disconnected():
-                    logger.info("client disconnected, stopping stream")
-                    return
+        # Apply timeout to each next-token wait, not to the whole stream.
+        stream = chain.astream(chain_input)
+        while True:
+            try:
+                token = await asyncio.wait_for(
+                    anext(stream),
+                    timeout=STREAM_TOKEN_TIMEOUT,
+                )
+            except StopAsyncIteration:
+                break
 
-                chunk = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": MODEL_ID,
-                    "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            if await request.is_disconnected():
+                logger.info("client disconnected, stopping stream")
+                return
+
+            chunk = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": MODEL_ID,
+                "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
     except asyncio.TimeoutError:
         logger.warning(f"stream token timeout after {STREAM_TOKEN_TIMEOUT}s")

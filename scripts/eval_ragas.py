@@ -23,8 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import json
+import re
+
 import pandas as pd
 from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_core.messages import AIMessage
 from loguru import logger
 from ragas import evaluate, EvaluationDataset, RunConfig
 from ragas.dataset_schema import SingleTurnSample
@@ -100,6 +104,25 @@ def build_metrics(has_reference: bool, ragas_llm=None, ragas_embeddings=None) ->
     return metrics
 
 
+def _fix_statements_json(text: str) -> str:
+    """将模型输出的 [{"statement": "..."}] 格式修正为 Ragas 期望的 ["..."] 格式。"""
+    # 去除 markdown 代码块
+    text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(data, dict) and "statements" in data:
+        stmts = data["statements"]
+        if stmts and isinstance(stmts[0], dict):
+            data["statements"] = [
+                s.get("statement") or s.get("text") or next(iter(s.values()), "")
+                for s in stmts
+            ]
+        return json.dumps(data, ensure_ascii=False)
+    return text
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ragas RAG 评估脚本")
     parser.add_argument("--output", default="baseline", help="结果文件名（不含 .json）")
@@ -160,8 +183,20 @@ def main():
     eval_dataset = EvaluationDataset(samples=samples)
 
     # 4. 配置 Ragas 使用 Ollama（替换默认 OpenAI）
+    # 包装 LLM，将 [{"statement": "..."}] 修正为 ["..."]，避免 Ragas OutputParserException
+    class _CleanedOllama(ChatOllama):
+        def invoke(self, *args, **kwargs):
+            msg = super().invoke(*args, **kwargs)
+            msg.content = _fix_statements_json(msg.content)
+            return msg
+
+        async def ainvoke(self, *args, **kwargs):
+            msg = await super().ainvoke(*args, **kwargs)
+            msg.content = _fix_statements_json(msg.content)
+            return msg
+
     ragas_llm = LangchainLLMWrapper(
-        ChatOllama(
+        _CleanedOllama(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             temperature=0,
