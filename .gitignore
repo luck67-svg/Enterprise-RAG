@@ -41,6 +41,3 @@ logs/
 
 # ruff
 .ruff_cache/
-
-# local git worktrees
-.worktrees/
