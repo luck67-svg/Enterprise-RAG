@@ -7,7 +7,7 @@ from app.config import settings
 
 
 def split_documents(docs: list[Document]) -> list[Document]:
-    """原有单级切分逻辑，保留不变（向后兼容）。"""
+    """Original single-level splitting logic, preserved for backward compatibility."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -17,10 +17,9 @@ def split_documents(docs: list[Document]) -> list[Document]:
 
 def split_parent_child(docs: list[Document]) -> list[Document]:
     """
-    两级切分：父块(parent_chunk_size) → 子块(child_chunk_size)。
+    Two-stage splitting: parent chunks first, then child chunks.
 
-    子块存入 Qdrant，metadata 中携带父块内容和 parent_id。
-    检索时命中子块后展开为父块传给 LLM，兼顾检索精度和上下文完整性。
+    Child metadata must include parent_id, parent_content, and chunk_id.
     """
     parent_splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.parent_chunk_size,
