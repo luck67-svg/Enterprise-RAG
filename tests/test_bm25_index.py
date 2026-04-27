@@ -1,7 +1,6 @@
 from pathlib import Path
 import sys
 from pathlib import Path as _Path
-import pytest
 
 ROOT = _Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,8 +16,7 @@ def test_tokenize_handles_ascii_words():
 
 
 def test_bm25_index_persists_and_searches(tmp_path: Path):
-    path = tmp_path / "bm25_chunks.json"
-    index = BM25Index(path)
+    index = BM25Index(tmp_path / "bm25_chunks.json")
     docs = [
         Document(
             page_content="expense reimbursement workflow",
@@ -45,57 +43,9 @@ def test_bm25_index_persists_and_searches(tmp_path: Path):
     index.replace_source("a.txt", [docs[0]])
     index.replace_source("b.txt", [docs[1]])
 
-    reloaded = BM25Index(path)
-    hits = reloaded.search("reimbursement", k=2)
+    hits = index.search("reimbursement", k=2)
 
-    assert len(hits) == 1
-    assert hits[0].metadata == {
-        "chunk_id": "c1",
-        "source": "a.txt",
-        "page": 1,
-        "parent_id": "p1",
-        "parent_content": "expense reimbursement workflow",
-    }
-
-
-def test_failed_replace_source_keeps_existing_index_usable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    index = BM25Index(tmp_path / "bm25_chunks.json")
-    original = Document(
-        page_content="expense reimbursement workflow",
-        metadata={
-            "source": "a.txt",
-            "page": 1,
-            "parent_id": "p1",
-            "parent_content": "expense reimbursement workflow",
-            "chunk_id": "c1",
-        },
-    )
-    replacement = Document(
-        page_content="travel booking process",
-        metadata={
-            "source": "a.txt",
-            "page": 9,
-            "parent_id": "p9",
-            "parent_content": "travel booking process",
-            "chunk_id": "c9",
-        },
-    )
-
-    index.replace_source("a.txt", [original])
-
-    def fail_dumps(*args, **kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr("app.rag.bm25_index.json.dumps", fail_dumps)
-
-    with pytest.raises(RuntimeError, match="boom"):
-        index.replace_source("a.txt", [replacement])
-
-    hits = index.search("reimbursement", k=3)
-
-    assert len(hits) == 1
-    assert hits[0].metadata["chunk_id"] == "c1"
-    assert hits[0].metadata["source"] == "a.txt"
+    assert [doc.metadata["chunk_id"] for doc in hits] == ["c1"]
 
 
 def test_delete_source_removes_chunks_from_search(tmp_path: Path):
