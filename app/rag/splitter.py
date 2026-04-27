@@ -40,6 +40,7 @@ def split_parent_child(docs: list[Document]) -> list[Document]:
             for child in child_docs:
                 child.metadata["parent_id"] = parent_id
                 child.metadata["parent_content"] = parent.page_content
+                child.metadata["chunk_id"] = str(uuid.uuid4())
             children.extend(child_docs)
 
     return children
