@@ -7,7 +7,7 @@ from app.config import settings
 
 
 def split_documents(docs: list[Document]) -> list[Document]:
-    """原有单级切分逻辑，保留不变（向后兼容）。"""
+    """鍘熸湁鍗曠骇鍒囧垎閫昏緫锛屼繚鐣欎笉鍙橈紙鍚戝悗鍏煎锛夈€?"""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,

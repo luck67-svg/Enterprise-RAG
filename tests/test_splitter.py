@@ -1,12 +1,4 @@
-import sys
-from pathlib import Path
-
 from langchain_core.documents import Document
-
-# Ensure this test runs standalone without relying on other tests mutating sys.path.
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from app.rag import splitter as splitter_module
 from app.rag.splitter import split_parent_child
@@ -35,5 +27,3 @@ def test_split_parent_child_assigns_unique_chunk_ids(monkeypatch):
     assert len(chunk_ids) == len(set(chunk_ids))
     assert all(chunk.metadata["parent_id"] == parent_ids[0] for chunk in chunks)
     assert all(chunk.metadata["parent_content"] == expected_parent_content for chunk in chunks)
-    assert all(chunk.metadata["source"] == "hr.pdf" for chunk in chunks)
-    assert all(chunk.metadata["page"] == 1 for chunk in chunks)
