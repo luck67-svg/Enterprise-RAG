@@ -6,7 +6,10 @@ from app.config import settings
 
 
 def rerank_documents(query: str, documents: list[Document]) -> list[Document]:
-    """通过远程 reranker 服务对父块重排，返回按相关性降序排列的列表。"""
+    """通过远程 reranker 服务对父块重排，过滤低相关块后返回降序列表。
+
+    分数低于 reranker_score_threshold 的块被丢弃，但至少保留得分最高的 1 个。
+    """
     if not documents:
         return documents
 
@@ -15,7 +18,7 @@ def rerank_documents(query: str, documents: list[Document]) -> list[Document]:
         resp = httpx.post(
             f"{settings.reranker_base_url}/rerank",
             json={"query": query, "documents": texts},
-            timeout=httpx.Timeout(connect=2.0, read=8.0),
+            timeout=httpx.Timeout(connect=2.0, read=8.0, write=2.0, pool=2.0),
         )
         resp.raise_for_status()
         scores = resp.json()["scores"]
@@ -29,4 +32,13 @@ def rerank_documents(query: str, documents: list[Document]) -> list[Document]:
 
     scored = sorted(zip(scores, documents), key=lambda x: x[0], reverse=True)
     logger.debug(f"Reranker scores: {[round(float(s), 3) for s, _ in scored]}")
-    return [doc for _, doc in scored]
+
+    threshold = settings.reranker_score_threshold
+    filtered = [(s, doc) for s, doc in scored if s >= threshold]
+    if not filtered:
+        filtered = [scored[0]]  # 兜底：至少保留最高分块
+        logger.debug(f"All scores below threshold {threshold}, keeping top-1 as fallback")
+    else:
+        logger.debug(f"Reranker threshold {threshold}: kept {len(filtered)}/{len(scored)} docs")
+
+    return [doc for _, doc in filtered]
