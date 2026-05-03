@@ -29,6 +29,9 @@ dependencies = [
     "rapidfuzz>=3.14.5",
     "rank-bm25>=0.2.2",
     "jieba>=0.42",
+    # Reranker
+    "sentence-transformers>=2.2",
+    "torch>=2.0",
 ]
 
 [tool.uv]
