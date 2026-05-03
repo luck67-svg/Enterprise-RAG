@@ -43,8 +43,9 @@ echo === 同步远程 Ollama 日志 -^> logs\ollama.log
 start /b ssh %SSH_OPTS% %REMOTE_SSH_USER%@%REMOTE_SSH_HOST% "tail -f /tmp/ollama.log" > "%PROJECT_DIR%\logs\ollama.log" 2>&1
 
 echo === 启动本地 Reranker 服务...
-start /b uv run python -m uvicorn app.reranker_service:app --host 0.0.0.0 --port 8001
+start "" /D D:\Enterprise-RAG "uv run python -m uvicorn app.reranker_service:app --host 0.0.0.0 --port 8001"
 echo     Reranker: http://localhost:8001
+echo     (等待 5 秒后启动 Qdrant+Ollama+FastAPI)
 
 goto :start_fastapi
 
