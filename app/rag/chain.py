@@ -2,14 +2,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from loguru import logger
 
 from app.config import settings
 from app.llm.ollama_client import get_llm
 from app.rag.reranker import rerank_documents
-from app.rag.vectorstore import get_vectorstore
 
 SYSTEM_PROMPT = """你是一个企业知识库问答助手。请严格依据下面提供的【上下文】回答用户问题。
 如果上下文中没有答案，请直接回答"根据已有资料无法回答"，不要编造。
@@ -69,24 +66,9 @@ def _expand_to_parents(docs: list[Document]) -> list[Document]:
 
 
 def get_retriever():
-    """返回检索器：检索子块(child_retrieval_k) → 去重展开为父块(retrieval_top_k)。
-    供评估脚本和 RAG chain 使用。
-    """
-    base_retriever = get_vectorstore().as_retriever(
-        search_kwargs={"k": settings.child_retrieval_k}
-    )
-    final_top_k = settings.retrieval_top_k
-
-    class ParentExpandingRetriever(BaseRetriever):
-        def _get_relevant_documents(
-            self, query: str, *, run_manager: CallbackManagerForRetrieverRun
-        ) -> list[Document]:
-            child_docs = base_retriever.invoke(query)
-            parents = _expand_to_parents(child_docs)
-            reranked = rerank_documents(query, parents)
-            return reranked[:final_top_k]
-
-    return ParentExpandingRetriever()
+    """返回混合检索器：BM25 + Dense → RRF → Parent Expand → Rerank。"""
+    from app.rag.hybrid_retriever import HybridRetriever
+    return HybridRetriever()
 
 
 def get_rag_chain(temperature: float = 0.2):
