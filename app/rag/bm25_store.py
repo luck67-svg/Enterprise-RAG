@@ -1,4 +1,6 @@
+import os
 import pickle
+import tempfile
 from pathlib import Path
 
 import jieba
@@ -37,7 +39,20 @@ class BM25Store:
 
     def _save(self) -> None:
         self._index_path.parent.mkdir(parents=True, exist_ok=True)
-        self._index_path.write_bytes(pickle.dumps({"documents": self._documents}))
+        data = pickle.dumps({"documents": self._documents})
+        tmp_fd, tmp_path_str = tempfile.mkstemp(
+            dir=self._index_path.parent, suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp_path_str, str(self._index_path))
+        except Exception:
+            try:
+                os.unlink(tmp_path_str)
+            except OSError:
+                pass
+            raise
 
     def _rebuild(self) -> None:
         if self._documents:
@@ -63,6 +78,8 @@ class BM25Store:
         if self._bm25 is None or not self._documents:
             return []
         tokens = _tokenize(query)
+        if not tokens:
+            return []
         scores = self._bm25.get_scores(tokens)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [self._documents[i] for i in top_indices]
