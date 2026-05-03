@@ -7,6 +7,7 @@ from app.config import settings
 from app.rag.loaders import load_file, SUPPORTED_EXTENSIONS
 from app.rag.splitter import split_parent_child
 from app.rag.vectorstore import get_vectorstore, get_client
+from app.rag.bm25_store import get_bm25_store
 
 # 已上传文件的哈希缓存: {filename: sha256_hex}
 _file_hashes: dict[str, str] = {}
@@ -78,6 +79,9 @@ async def upload(file: UploadFile = File(...)):
             raise HTTPException(503, "Embedding 调用失败，请检查 Ollama 和 bge-m3 模型是否可用")
         raise HTTPException(503, f"向量入库失败: {e}")
 
+    get_bm25_store().add_documents(chunks)
+    logger.info(f"BM25 index updated: +{len(chunks)} chunks for {file.filename}")
+
     _file_hashes[file.filename] = file_hash
     return {"file": file.filename, "chunks": len(chunks), "ids": len(ids)}
 
@@ -117,6 +121,7 @@ def delete_document(filename: str):
         filepath.unlink()
 
     _delete_vectors_by_source(filename)
+    get_bm25_store().remove_by_source(filename)
     _file_hashes.pop(filename, None)
     logger.info(f"deleted document: {filename}")
     return {"deleted": filename}
