@@ -28,6 +28,7 @@ dependencies = [
     "ragas>=0.2",
     "rapidfuzz>=3.14.5",
     "rank-bm25>=0.2.2",
+    "jieba>=0.42",
 ]
 
 [tool.uv]

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     child_chunk_size: int = 400
     child_chunk_overlap: int = 60
     child_retrieval_k: int = 12
+    bm25_top_k: int = 12
+    rrf_k: int = 60
     reranker_score_threshold: float = 0.0
 
     reranker_base_url: str = "http://localhost:8001"
