@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.config import settings
 from app.rag.loaders import load_file, SUPPORTED_EXTENSIONS
-from app.rag.splitter import split_parent_child
+from app.rag.splitter import split_parent_child, get_parent_chunks
 from app.rag.vectorstore import get_vectorstore, get_client
 from app.rag.bm25_store import get_bm25_store
 
@@ -65,12 +65,12 @@ async def upload(file: UploadFile = File(...)):
         dest.unlink(missing_ok=True)
         raise HTTPException(422, f"文档解析失败: {e}")
 
-    chunks = split_parent_child(docs)
-    for c in chunks:
+    child_chunks = split_parent_child(docs)
+    for c in child_chunks:
         c.metadata["source"] = file.filename
 
     try:
-        ids = get_vectorstore().add_documents(chunks)
+        ids = get_vectorstore().add_documents(child_chunks)
     except Exception as e:
         err = str(e).lower()
         if "connect" in err and "6333" in err:
@@ -79,11 +79,15 @@ async def upload(file: UploadFile = File(...)):
             raise HTTPException(503, "Embedding 调用失败，请检查 Ollama 和 bge-m3 模型是否可用")
         raise HTTPException(503, f"向量入库失败: {e}")
 
-    get_bm25_store().add_documents(chunks)
-    logger.info(f"BM25 index updated: +{len(chunks)} chunks for {file.filename}")
+    # P3: BM25 索引父块，关键词上下文更完整，匹配质量更高
+    parent_chunks = get_parent_chunks(docs)
+    for c in parent_chunks:
+        c.metadata["source"] = file.filename
+    get_bm25_store().add_documents(parent_chunks)
+    logger.info(f"BM25 index updated: +{len(parent_chunks)} parent chunks for {file.filename}")
 
     _file_hashes[file.filename] = file_hash
-    return {"file": file.filename, "chunks": len(chunks), "ids": len(ids)}
+    return {"file": file.filename, "chunks": len(child_chunks), "ids": len(ids)}
 
 
 @router.get("/documents")

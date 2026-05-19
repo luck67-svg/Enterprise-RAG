@@ -15,6 +15,18 @@ def split_documents(docs: list[Document]) -> list[Document]:
     return splitter.split_documents(docs)
 
 
+def get_parent_chunks(docs: list[Document]) -> list[Document]:
+    """返回父块列表，用于 BM25 索引（比子块有更完整的关键词上下文）。"""
+    parent_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.parent_chunk_size,
+        chunk_overlap=200,
+    )
+    parents: list[Document] = []
+    for doc in docs:
+        parents.extend(parent_splitter.split_documents([doc]))
+    return parents
+
+
 def split_parent_child(docs: list[Document]) -> list[Document]:
     """
     两级切分：父块(parent_chunk_size) → 子块(child_chunk_size)。
