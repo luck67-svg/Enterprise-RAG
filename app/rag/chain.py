@@ -1,12 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableLambda, RunnableBranch
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from loguru import logger
 
 from app.config import settings
 from app.llm.ollama_client import get_llm
-from app.rag.reranker import rerank_documents
 
 SYSTEM_PROMPT = """你是一个企业知识库问答助手。请严格依据下面提供的【上下文】回答用户问题。
 如果上下文中没有答案，请直接回答"根据已有资料无法回答"，不要编造。
@@ -18,6 +17,19 @@ SYSTEM_PROMPT = """你是一个企业知识库问答助手。请严格依据下�
 
 PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{question}"),
+])
+
+# 多轮问题改写提示词：将依赖上文的问题改为可独立检索的独立问题
+_CONTEXTUALIZE_Q_SYSTEM = (
+    "给定聊天历史和最新的用户问题，将问题改写为一个无需上下文即可独立理解的问题。"
+    "若问题中含有代词或指代（如：它、这个、上述、该），替换为具体名词。"
+    "若问题已可独立理解，原样返回。不要回答问题，只改写或原样返回问题。"
+)
+
+_CONTEXTUALIZE_Q_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", _CONTEXTUALIZE_Q_SYSTEM),
     MessagesPlaceholder("chat_history"),
     ("human", "{question}"),
 ])
@@ -40,29 +52,9 @@ def _format_docs(docs: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
-def _expand_to_parents(docs: list[Document]) -> list[Document]:
-    """将子块列表展开为去重后的父块列表。
-    无 parent_content 的旧格式 doc 原样返回（向后兼容）。
-    """
-    expanded: list[Document] = []
-    seen_parents: set[str] = set()
-
-    for doc in docs:
-        parent_id = doc.metadata.get("parent_id")
-        parent_content = doc.metadata.get("parent_content")
-
-        if parent_content and parent_id:
-            if parent_id not in seen_parents:
-                seen_parents.add(parent_id)
-                parent_meta = {
-                    k: v for k, v in doc.metadata.items()
-                    if k not in ("parent_id", "parent_content")
-                }
-                expanded.append(Document(page_content=parent_content, metadata=parent_meta))
-        else:
-            expanded.append(doc)
-
-    return expanded
+def _log_rewritten_query(q: str) -> str:
+    logger.info(f"query rewritten → {q[:100]}")
+    return q
 
 
 def get_retriever():
@@ -76,9 +68,26 @@ def get_rag_chain(temperature: float = 0.2):
     if temperature not in _chain_cache:
         retriever = get_retriever()
         llm = get_llm(temperature=temperature)
+
+        # 有历史时：LLM 先将依赖上文的问题改写为独立查询，再检索
+        # 无历史时：直接用原问题检索，零额外 LLM 调用
+        contextualize_q_chain = (
+            _CONTEXTUALIZE_Q_PROMPT
+            | llm
+            | StrOutputParser()
+            | RunnableLambda(_log_rewritten_query)
+        )
+        history_aware_retriever = RunnableBranch(
+            (
+                lambda x: bool(x.get("chat_history")),
+                contextualize_q_chain | retriever,
+            ),
+            RunnableLambda(lambda x: x["question"]) | retriever,
+        )
+
         _chain_cache[temperature] = (
             {
-                "context": RunnableLambda(lambda x: x["question"]) | retriever | _format_docs,
+                "context": history_aware_retriever | _format_docs,
                 "question": RunnableLambda(lambda x: x["question"]),
                 "chat_history": RunnableLambda(lambda x: x["chat_history"]),
             }
