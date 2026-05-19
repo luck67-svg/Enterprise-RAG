@@ -1,157 +1,208 @@
 # Enterprise RAG
 
-企业级 RAG（检索增强生成）系统，使用本地 LLM 驱动，无需依赖外部 API。
+企业知识库问答系统，基于混合检索（BM25 + 向量检索 + RRF 融合 + Reranker）构建，支持通过 Open WebUI 直接对话，并兼容 OpenAI Chat API 格式。
 
-## 架构概览
+## 功能特性
+
+- **混合检索**：BM25 稀疏检索 + Qdrant 向量检索，RRF 加权融合（Dense 优先），父子块架构兼顾检索精度与上下文完整性
+- **Reranker 精排**：BGE-Reranker-v2-m3 交叉编码器对候选块重排，阈值过滤噪音
+- **OpenAI 兼容接口**：`/v1/chat/completions` 支持流式与非流式，可直接挂载到 Open WebUI
+- **文档管理 API**：上传 / 删除 / 列表，支持 PDF、Word、TXT，自动去重
+- **一键启动**：`start_tunnel.bat`（Windows）/ `start_tunnel.sh`（Linux）自动拉起所有依赖服务
+
+## 系统架构
 
 ```
-知识库管理页面（localhost:8000）
-       ↓ 上传文档
-Open WebUI（前端对话界面）
-       ↓ OpenAI-compatible API（支持 Streaming）
-RAG Pipeline Server（本项目，FastAPI）
-       ↓ 检索          ↓ 推理
-  Qdrant（向量库）   Ollama（LLM + Embedding）
-       ↑
-  知识库文档（PDF / DOCX / TXT）
+用户 (Open WebUI / API Client)
+         │
+         ▼
+   FastAPI  :8000
+   ├─ /v1/chat/completions   (OpenAI 兼容，流式/非流式)
+   └─ /kb/upload|documents   (知识库文档管理)
+         │
+         ▼
+   HybridRetriever
+   ├─ Dense  → Qdrant :6333        (子块向量检索，bge-m3 embedding)
+   ├─ Sparse → BM25 In-Memory      (父块关键词检索，CJK bigram + 整词)
+   ├─ RRF 加权融合 (dense_weight=1.5)
+   ├─ _expand_to_parents           (命中子块展开为父块，内容去重)
+   └─ Reranker :8001               (BGE-Reranker-v2-m3，远程 CPU/GPU)
+         │
+         ▼
+   Ollama :11434                   (LLM 推理，qwen3.5:35b)
 ```
 
-## 依赖说明
+**远程服务拓扑**（通过 SSH 隧道透明转发）：
 
-| 组件 | 用途 |
+```
+本地 Windows / Mac                   远程 Linux 服务器
+──────────────────────               ──────────────────
+FastAPI       :8000                  Ollama    :11434
+Qdrant        :6333  (Docker)   ←SSH─ Reranker  :8001
+Open WebUI    :3000  (Docker)
+```
+
+## 快速启动
+
+### 前置条件
+
+| 依赖 | 说明 |
 |------|------|
-| [Ollama](https://ollama.com) | LLM 推理 + Embedding 模型服务 |
-| [Open WebUI](https://github.com/open-webui/open-webui) | 对话前端界面 |
-| [LangChain](https://python.langchain.com) | RAG 全流程编排（加载、切片、检索、问答） |
-| [Qdrant](https://qdrant.tech) | 高性能向量数据库 |
-| [FastAPI](https://fastapi.tiangolo.com) | Pipeline Server + 知识库管理页面 |
-| pymupdf / python-docx | 知识库文档解析（PDF / DOCX / TXT） |
+| Docker Desktop | 运行 Qdrant + Open WebUI |
+| [uv](https://docs.astral.sh/uv/) | Python 包管理 |
+| SSH 密钥 `~/.ssh/veridian` | 访问远程服务器 |
+| 远程服务器 | 已安装 Ollama + bge-reranker-v2-m3 模型 |
 
-## 环境要求
-
-- Python >= 3.11
-- [uv](https://docs.astral.sh/uv/) 包管理器
-- [Ollama](https://ollama.com/download) 已安装
-- [Docker](https://www.docker.com) 用于启动 Qdrant 和 Open WebUI
-
-## 快速开始
-
-### 一键安装（首次）
+### 首次部署远程 Reranker
 
 ```bash
-# 本地 Ollama
-./scripts/setup.sh
-
-# 远程 Ollama
-./scripts/setup.sh --remote
+# 将 app/reranker_service.py 上传到远程并启动
+bash deploy_reranker_remote.sh
 ```
 
-自动完成：检查前置工具 → 安装 Python 依赖 → 拉取 Docker 镜像 → 拉取 Ollama 模型（qwen3.5:0.8b + bge-m3）
+### 日常一键启动
 
-### 一键启动（日常开发）
+**Windows（PowerShell）：**
+
+```powershell
+.\scripts\start_tunnel.bat
+```
+
+**Linux / macOS：**
 
 ```bash
-# 使用远程 Ollama（默认）
-./scripts/start_tunnel.sh
-
-# 使用本地 Ollama
-./scripts/start_tunnel.sh --local
+bash scripts/start_tunnel.sh
 ```
 
-自动完成：启动 Docker 容器 → 启动 Ollama → SSH 隧道（远程模式） → 启动 FastAPI
+启动顺序：Docker（Qdrant + Open WebUI）→ 远程 Ollama → SSH 隧道 → 远程 Reranker → FastAPI
 
-Windows 用户使用 `scripts\start_tunnel.bat`。
-
-### 服务地址
+启动后访问：
 
 | 服务 | 地址 |
 |------|------|
-| 知识库管理页面 | http://localhost:8000 |
-| API 文档 (Swagger) | http://localhost:8000/docs |
 | Open WebUI | http://localhost:3000 |
+| FastAPI Docs | http://localhost:8000/docs |
 | Qdrant Dashboard | http://localhost:6333/dashboard |
 
-### 使用流程
+### Open WebUI 接入配置
 
-1. 访问 http://localhost:8000 上传知识库文档（PDF / DOCX / TXT）
-2. 访问 http://localhost:3000 打开 Open WebUI，选择模型 `enterprise-rag` 对话
-3. 或直接调用 API：
+在 Open WebUI → 管理员设置 → 连接 中添加：
 
-```bash
-# 健康检查
-curl http://localhost:8000/health
+- **URL**：`http://host.docker.internal:8000/v1`
+- **API Key**：任意字符串（系统不校验）
 
-# 上传文档
-curl -X POST http://localhost:8000/kb/upload -F "file=@your_doc.pdf"
+## 环境变量
 
-# 问答（非流式）
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"enterprise-rag","messages":[{"role":"user","content":"你的问题"}]}'
-
-# 问答（流式）
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"enterprise-rag","messages":[{"role":"user","content":"你的问题"}],"stream":true}'
-```
-
-## API 接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/health` | 健康检查（Ollama 状态、模型列表） |
-| GET | `/` | 知识库管理页面 |
-| POST | `/kb/upload` | 上传文档（支持重复检测） |
-| GET | `/kb/documents` | 已上传文档列表 |
-| DELETE | `/kb/documents/{filename}` | 删除文档及其向量 |
-| GET | `/kb/stats` | 向量库统计信息 |
-| GET | `/v1/models` | 模型列表（OpenAI 兼容） |
-| POST | `/v1/chat/completions` | 对话补全（支持流式 + 多轮对话） |
-
-## 配置
-
-通过 `.env` 文件覆盖默认配置：
+复制 `.env.example` 为 `.env` 并按需修改：
 
 ```env
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen3.5:0.8b
+OLLAMA_MODEL=qwen3.5:35b
 EMBEDDING_MODEL=bge-m3
 QDRANT_URL=http://localhost:6333
-CHUNK_SIZE=800
-CHUNK_OVERLAP=120
-RETRIEVAL_TOP_K=5
+RERANKER_BASE_URL=http://localhost:8001
 ```
+
+## API 说明
+
+### 知识库管理
+
+```bash
+# 上传文档
+curl -X POST http://localhost:8000/kb/upload \
+  -F "file=@your_doc.pdf"
+
+# 列出已上传文档
+curl http://localhost:8000/kb/documents
+
+# 删除文档（同步清理 Qdrant 向量 + BM25 索引）
+curl -X DELETE http://localhost:8000/kb/documents/your_doc.pdf
+
+# 向量库统计
+curl http://localhost:8000/kb/stats
+```
+
+### 问答（OpenAI 兼容）
+
+```bash
+# 非流式
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "rag",
+    "messages": [{"role": "user", "content": "请介绍知识库中的主要内容"}]
+  }'
+
+# 流式
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"rag","messages":[{"role":"user","content":"问题"}],"stream":true}'
+```
+
+完整接口列表见 http://localhost:8000/docs。
+
+## 检索参数配置
+
+`app/config.py` 中可调整的关键参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `parent_chunk_size` | 1000 | 父块大小（BM25 索引单元） |
+| `child_chunk_size` | 400 | 子块大小（向量检索单元） |
+| `child_retrieval_k` | 12 | Dense 检索候选数 |
+| `bm25_top_k` | 6 | BM25 候选数 |
+| `rrf_k` | 30 | RRF 融合参数（越小排名差异越显著） |
+| `retrieval_top_k` | 5 | 最终传给 LLM 的块数 |
+| `reranker_score_threshold` | 0.3 | Reranker 分数过滤阈值 |
 
 ## 项目结构
 
 ```
-app/
-├── api/
-│   ├── kb.py              # 知识库管理 API（上传、列表、删除）
-│   └── openai_compat.py   # OpenAI 兼容 API（对话、流式、多轮）
-├── llm/
-│   └── ollama_client.py   # Ollama 客户端（模型分类、LLM 实例）
-├── rag/
-│   ├── chain.py           # RAG chain 构建（检索 + 生成）
-│   ├── embeddings.py      # Embedding 模型
-│   ├── loaders.py         # 文档加载（PDF / DOCX / TXT）
-│   ├── splitter.py        # 文档切片
-│   └── vectorstore.py     # Qdrant 向量库
-├── static/
-│   └── index.html         # 知识库管理前端页面
-├── config.py              # 配置管理
-└── main.py                # FastAPI 入口
-scripts/
-├── setup.sh               # 首次安装脚本
-├── start_tunnel.sh        # 一键启动脚本 (macOS/Linux)
-├── start_tunnel.bat        # 一键启动脚本 (Windows)
-└── docker-compose.yml     # Qdrant + Open WebUI
+Enterprise-RAG/
+├── app/
+│   ├── main.py                 # FastAPI 入口 & lifespan
+│   ├── config.py               # 全局配置（pydantic-settings，支持 .env）
+│   ├── reranker_service.py     # 部署到远程的 Reranker FastAPI 服务
+│   ├── api/
+│   │   ├── kb.py               # 知识库上传 / 删除 / 列表
+│   │   └── openai_compat.py    # /v1/chat/completions 兼容层
+│   ├── llm/
+│   │   └── ollama_client.py    # Ollama LLM / Embedding 客户端
+│   └── rag/
+│       ├── chain.py            # RAG Chain 组装
+│       ├── hybrid_retriever.py # BM25 + Dense + RRF + Reranker
+│       ├── bm25_store.py       # BM25 持久化索引（CJK bigram 分词）
+│       ├── reranker.py         # 远程 Reranker HTTP 客户端（指数退避重试）
+│       ├── vectorstore.py      # Qdrant 向量库封装
+│       ├── embeddings.py       # Ollama Embedding 封装
+│       ├── splitter.py         # 父子块切分（parent/child chunk）
+│       └── loaders.py          # PDF / Word / TXT 文档加载
+├── scripts/
+│   ├── start_tunnel.bat        # Windows 一键启动
+│   ├── start_tunnel.sh         # Linux/macOS 一键启动
+│   └── docker-compose.yml      # Qdrant + Open WebUI
+├── deploy_reranker_remote.sh   # 远程 Reranker 部署脚本（SCP + SSH）
+└── pyproject.toml
 ```
 
 ## 开发
 
 ```bash
+# 安装依赖
 uv sync --dev
+
+# 代码检查
 uv run ruff check .
+
+# 运行测试
 uv run pytest
+
+# 单独启动 FastAPI（已有隧道的情况下）
+uv run uvicorn app.main:app --reload
 ```
+
+## 注意事项
+
+- **重新上传文档**：若从旧版本升级（BM25 由子块改为父块索引），已上传的文档需重新上传一次，BM25 索引才会使用新的父块格式
+- **模型预热**：首次启动后第一次问答会触发模型加载（约 30-60s），之后响应正常；预热脚本在 `start_tunnel.bat` 步骤 [4/5] 自动执行
+- **CUDA 驱动**：若远程服务器 CUDA 驱动版本过旧，Reranker 自动降级到 CPU 运行，功能正常但速度稍慢
