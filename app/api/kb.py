@@ -54,10 +54,11 @@ async def upload(file: UploadFile = File(...)):
     dest.write_bytes(content)
     logger.info(f"saved upload: {dest}")
 
-    # 如果同名文件内容变了，先删除旧向量
+    # 如果同名文件内容变了，先删除旧向量和旧 BM25 条目（保持两者一致）
     if file.filename in _file_hashes:
         _delete_vectors_by_source(file.filename)
-        logger.info(f"replaced old vectors: {file.filename}")
+        get_bm25_store().remove_by_source(file.filename)
+        logger.info(f"replaced old vectors + BM25: {file.filename}")
 
     try:
         docs = load_file(dest)

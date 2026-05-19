@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     bm25_top_k: int = 6              # 从 12 降到 6，减少 BM25 噪音候选数
     rrf_k: int = 30                  # 从 60 降到 30，让排名差异更重要
     reranker_score_threshold: float = 0.3  # 从 0.0 提高，让 Reranker 真正起过滤作用
+    rerank_candidate_limit: int = 8        # 送入 Reranker 的最大候选数
 
     reranker_base_url: str = "http://localhost:8001"
 

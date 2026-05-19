@@ -8,9 +8,6 @@ from app.rag.bm25_store import get_bm25_store
 from app.rag.reranker import rerank_documents
 from app.rag.vectorstore import get_vectorstore
 
-# 只对前 N 个候选rerank，减少计算量和延迟
-_RERANK_CANDIDATE_LIMIT = 8
-
 
 def _rrf_merge(
     dense_docs: list[Document],
@@ -91,8 +88,7 @@ class HybridRetriever(BaseRetriever):
 
         parents = _expand_to_parents(fused)
 
-        # 优化：只 rerank 前 N 个候选，减少计算量
-        rerank_candidates = parents[:_RERANK_CANDIDATE_LIMIT]
+        rerank_candidates = parents[:settings.rerank_candidate_limit]
         try:
             reranked = rerank_documents(query, rerank_candidates)
         except RuntimeError as e:
