@@ -41,3 +41,14 @@ logs/
 
 # ruff
 .ruff_cache/
+
+# Model weights (large binary files, deploy separately)
+bge-reranker-v2-m3/
+*.bin
+*.safetensors
+
+# Temp / debug files
+*.stackdump
+body.json
+mojibake-codex-acl-backup.txt
+repair-*.ps1
